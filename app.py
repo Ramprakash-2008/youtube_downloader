@@ -3,12 +3,8 @@ import yt_dlp
 import os
 import uuid
 import threading
-import time
-from dotenv import load_dotenv
+import shutil
 
-load_dotenv()
-
-FFMPEG_PATH = os.environ.get("FFMPEG_PATH", "").strip()
 app = Flask(__name__)
 
 # =========================================================
@@ -24,30 +20,11 @@ DOWNLOAD_DIR = os.path.join(
 
 os.makedirs(DOWNLOAD_DIR, exist_ok=True)
 
-# =========================================================
-# FFMPEG
-# =========================================================
-#
-# LOCAL WINDOWS:
-# Set environment variable:
-#
-# FFMPEG_PATH=D:\app\ffmpeg-8.0.1-essentials_build\bin
-#
-# RENDER:
-# Leave FFMPEG_PATH empty if ffmpeg is installed
-# and available in PATH.
-#
-# =========================================================
-
-
-
-# =========================================================
-# DOWNLOAD JOB STORAGE
-# =========================================================
+# Render normally has ffmpeg available if installed
+# through the Render environment.
+FFMPEG_PATH = os.environ.get("FFMPEG_PATH", "")
 
 download_jobs = {}
-
-jobs_lock = threading.Lock()
 
 
 # =========================================================
@@ -57,6 +34,82 @@ jobs_lock = threading.Lock()
 @app.route("/")
 def home():
     return render_template("index.html")
+
+
+# =========================================================
+# HEALTH CHECK
+# =========================================================
+
+@app.route("/health")
+def health():
+    return jsonify({
+        "status": "ok"
+    })
+
+
+# =========================================================
+# FFMPEG CHECK
+# =========================================================
+
+def ffmpeg_available():
+    """
+    Check whether FFmpeg is available.
+    """
+
+    if FFMPEG_PATH:
+        return os.path.exists(
+            os.path.join(
+                FFMPEG_PATH,
+                "ffmpeg.exe"
+            )
+        ) or os.path.exists(
+            os.path.join(
+                FFMPEG_PATH,
+                "ffmpeg"
+            )
+        )
+
+    return shutil.which("ffmpeg") is not None
+
+
+# =========================================================
+# FORMAT DURATION
+# =========================================================
+
+def format_duration(seconds):
+
+    if not seconds:
+        return "Unknown"
+
+    seconds = int(seconds)
+
+    hours = seconds // 3600
+    minutes = (seconds % 3600) // 60
+    secs = seconds % 60
+
+    if hours > 0:
+        return f"{hours}:{minutes:02d}:{secs:02d}"
+
+    return f"{minutes}:{secs:02d}"
+
+
+# =========================================================
+# COMMON YT-DLP OPTIONS
+# =========================================================
+
+def get_base_options():
+
+    options = {
+        "quiet": True,
+        "no_warnings": True,
+        "noplaylist": True,
+        "skip_download": True,
+    }
+
+    if FFMPEG_PATH:
+        options["ffmpeg_location"] = FFMPEG_PATH
+
+    return options
 
 
 # =========================================================
@@ -71,6 +124,7 @@ def fetch_video():
     url = data.get("url", "").strip()
 
     if not url:
+
         return jsonify({
             "success": False,
             "error": "Please enter a YouTube URL."
@@ -78,15 +132,7 @@ def fetch_video():
 
     try:
 
-        options = {
-            "quiet": True,
-            "no_warnings": True,
-            "skip_download": True,
-            "noplaylist": True,
-        }
-
-        if FFMPEG_PATH:
-            options["ffmpeg_location"] = FFMPEG_PATH
+        options = get_base_options()
 
         with yt_dlp.YoutubeDL(options) as ydl:
 
@@ -94,38 +140,6 @@ def fetch_video():
                 url,
                 download=False
             )
-
-        # -------------------------------------------------
-        # DURATION
-        # -------------------------------------------------
-
-        duration = info.get("duration")
-
-        if duration:
-
-            hours = duration // 3600
-            minutes = (duration % 3600) // 60
-            seconds = duration % 60
-
-            if hours > 0:
-
-                duration_text = (
-                    f"{hours}:{minutes:02d}:{seconds:02d}"
-                )
-
-            else:
-
-                duration_text = (
-                    f"{minutes}:{seconds:02d}"
-                )
-
-        else:
-
-            duration_text = "Unknown"
-
-        # -------------------------------------------------
-        # RESPONSE
-        # -------------------------------------------------
 
         return jsonify({
 
@@ -136,7 +150,9 @@ def fetch_video():
                 "Unknown title"
             ),
 
-            "duration": duration_text,
+            "duration": format_duration(
+                info.get("duration")
+            ),
 
             "thumbnail": info.get(
                 "thumbnail",
@@ -152,28 +168,32 @@ def fetch_video():
 
     except Exception as e:
 
-        print("FETCH ERROR:", e)
+        error_message = str(e)
+
+        print(
+            "FETCH ERROR:",
+            error_message
+        )
+
+        if (
+            "Sign in to confirm" in error_message
+            or "not a bot" in error_message
+        ):
+
+            error_message = (
+                "YouTube is currently requiring "
+                "additional verification for this request. "
+                "Please try again later or use a different "
+                "supported source."
+            )
 
         return jsonify({
 
             "success": False,
 
-            "error": str(e)
+            "error": error_message
 
         }), 500
-
-
-# =========================================================
-# UPDATE PROGRESS
-# =========================================================
-
-def update_job(job_id, **values):
-
-    with jobs_lock:
-
-        if job_id in download_jobs:
-
-            download_jobs[job_id].update(values)
 
 
 # =========================================================
@@ -183,10 +203,6 @@ def update_job(job_id, **values):
 def progress_hook(data, job_id):
 
     status = data.get("status")
-
-    # -----------------------------------------------------
-    # DOWNLOADING
-    # -----------------------------------------------------
 
     if status == "downloading":
 
@@ -201,30 +217,24 @@ def progress_hook(data, job_id):
             or 0
         )
 
-        # -------------------------------------------------
-        # PERCENTAGE
-        # -------------------------------------------------
-
         if total > 0:
 
-            percentage = (
+            progress = (
                 downloaded / total
             ) * 100
 
-            percentage = max(
+            progress = max(
                 0,
-                min(percentage, 99)
+                min(progress, 99)
             )
 
         else:
 
-            percentage = 0
-
-        # -------------------------------------------------
-        # SPEED
-        # -------------------------------------------------
+            progress = 0
 
         speed = data.get("speed")
+
+        eta = data.get("eta")
 
         if speed:
 
@@ -244,71 +254,42 @@ def progress_hook(data, job_id):
 
             speed_text = "--"
 
-        # -------------------------------------------------
-        # ETA
-        # -------------------------------------------------
-
-        eta = data.get("eta")
-
         if eta is not None:
 
-            if eta >= 60:
-
-                minutes = eta // 60
-                seconds = eta % 60
-
-                eta_text = (
-                    f"{minutes}m {seconds}s"
-                )
-
-            else:
-
-                eta_text = f"{eta}s"
+            eta_text = f"{eta}s"
 
         else:
 
             eta_text = "--"
 
-        # -------------------------------------------------
-        # UPDATE JOB
-        # -------------------------------------------------
+        download_jobs[job_id] = {
 
-        update_job(
+            "status": "downloading",
 
-            job_id,
-
-            status="downloading",
-
-            progress=round(
-                percentage,
+            "progress": round(
+                progress,
                 1
             ),
 
-            speed=speed_text,
+            "speed": speed_text,
 
-            eta=eta_text
+            "eta": eta_text
 
-        )
-
-    # -----------------------------------------------------
-    # DOWNLOAD FINISHED / PROCESSING
-    # -----------------------------------------------------
+        }
 
     elif status == "finished":
 
-        update_job(
+        download_jobs[job_id] = {
 
-            job_id,
+            "status": "processing",
 
-            status="processing",
+            "progress": 99,
 
-            progress=99,
+            "speed": "--",
 
-            speed="--",
+            "eta": "--"
 
-            eta="--"
-
-        )
+        }
 
 
 # =========================================================
@@ -327,7 +308,7 @@ def download_worker(
     try:
 
         # -------------------------------------------------
-        # QUALITY
+        # Validate quality
         # -------------------------------------------------
 
         try:
@@ -336,24 +317,21 @@ def download_worker(
                 quality.replace("p", "")
             )
 
-        except:
+        except Exception:
 
             height = 720
 
         # -------------------------------------------------
-        # OUTPUT
+        # Output
         # -------------------------------------------------
 
         output_template = os.path.join(
-
             DOWNLOAD_DIR,
-
             f"{file_id}.%(ext)s"
-
         )
 
         # -------------------------------------------------
-        # COMMON OPTIONS
+        # Base options
         # -------------------------------------------------
 
         options = {
@@ -383,7 +361,7 @@ def download_worker(
         }
 
         # -------------------------------------------------
-        # FFMPEG
+        # FFmpeg
         # -------------------------------------------------
 
         if FFMPEG_PATH:
@@ -398,6 +376,13 @@ def download_worker(
 
         if format_type == "mp3":
 
+            if not ffmpeg_available():
+
+                raise Exception(
+                    "FFmpeg is required for MP3 "
+                    "conversion but was not found."
+                )
+
             options.update({
 
                 "format":
@@ -406,7 +391,6 @@ def download_worker(
                 "postprocessors": [
 
                     {
-
                         "key":
                             "FFmpegExtractAudio",
 
@@ -415,7 +399,6 @@ def download_worker(
 
                         "preferredquality":
                             "192"
-
                     }
 
                 ]
@@ -428,11 +411,17 @@ def download_worker(
 
         else:
 
+            # Prefer a single MP4 stream when possible.
+            # This avoids requiring a merge for every download.
+
             options.update({
 
                 "format":
                     (
-                        f"bv*[height<={height}]+ba/b"
+                        f"best[ext=mp4]"
+                        f"[height<={height}]/"
+                        f"best[height<={height}]/"
+                        f"best"
                     ),
 
                 "merge_output_format":
@@ -441,40 +430,35 @@ def download_worker(
             })
 
         # -------------------------------------------------
-        # STARTING
+        # Download
         # -------------------------------------------------
 
-        update_job(
+        download_jobs[job_id] = {
 
-            job_id,
+            "status":
+                "starting",
 
-            status="starting",
+            "progress":
+                0,
 
-            progress=0,
+            "speed":
+                "--",
 
-            speed="--",
+            "eta":
+                "--"
 
-            eta="--"
+        }
 
+        print(
+            f"STARTING DOWNLOAD: {job_id}"
         )
-
-        # -------------------------------------------------
-        # DOWNLOAD
-        # -------------------------------------------------
 
         with yt_dlp.YoutubeDL(options) as ydl:
 
             info = ydl.extract_info(
-
                 url,
-
                 download=True
-
             )
-
-        # -------------------------------------------------
-        # TITLE
-        # -------------------------------------------------
 
         title = info.get(
             "title",
@@ -482,50 +466,55 @@ def download_worker(
         )
 
         # -------------------------------------------------
-        # FIND OUTPUT FILE
+        # Find generated file
         # -------------------------------------------------
 
         matching_files = [
 
-            file
+            filename
 
-            for file in os.listdir(
+            for filename in os.listdir(
                 DOWNLOAD_DIR
             )
 
-            if file.startswith(file_id)
+            if filename.startswith(file_id)
 
         ]
 
         if not matching_files:
 
             raise Exception(
-                "Download completed but the file was not found."
+                "Download finished but the output "
+                "file could not be located."
             )
 
         filename = matching_files[0]
 
         # -------------------------------------------------
-        # COMPLETE
+        # Complete
         # -------------------------------------------------
 
-        update_job(
+        download_jobs[job_id] = {
 
-            job_id,
+            "status":
+                "completed",
 
-            status="completed",
+            "progress":
+                100,
 
-            progress=100,
+            "speed":
+                "--",
 
-            speed="--",
+            "eta":
+                "0",
 
-            eta="0",
+            "file":
+                filename,
 
-            file=filename,
+            "title":
+                title
 
-            title=title
-
-        )
+        }
 
         print(
             f"DOWNLOAD COMPLETED: {filename}"
@@ -533,26 +522,58 @@ def download_worker(
 
     except Exception as e:
 
+        error_message = str(e)
+
         print(
             "DOWNLOAD ERROR:",
-            e
+            error_message
         )
 
-        update_job(
+        # -------------------------------------------------
+        # Friendly YouTube verification error
+        # -------------------------------------------------
 
-            job_id,
+        if (
+            "Sign in to confirm" in error_message
+            or "not a bot" in error_message
+        ):
 
-            status="error",
+            error_message = (
+                "YouTube is currently requiring "
+                "additional verification for this request. "
+                "The server cannot complete this download "
+                "without YouTube verification."
+            )
 
-            progress=0,
+        # -------------------------------------------------
+        # FFmpeg error
+        # -------------------------------------------------
 
-            speed="--",
+        elif "ffmpeg" in error_message.lower():
 
-            eta="--",
+            error_message = (
+                "FFmpeg is required for this video format "
+                "but was not found on the server."
+            )
 
-            error=str(e)
+        download_jobs[job_id] = {
 
-        )
+            "status":
+                "error",
+
+            "progress":
+                0,
+
+            "speed":
+                "--",
+
+            "eta":
+                "--",
+
+            "error":
+                error_message
+
+        }
 
 
 # =========================================================
@@ -579,15 +600,12 @@ def start_download():
         "720p"
     )
 
-    # -----------------------------------------------------
-    # VALIDATION
-    # -----------------------------------------------------
-
     if not url:
 
         return jsonify({
 
-            "success": False,
+            "success":
+                False,
 
             "error":
                 "No URL provided."
@@ -601,42 +619,33 @@ def start_download():
 
         return jsonify({
 
-            "success": False,
+            "success":
+                False,
 
             "error":
                 "Invalid format."
 
         }), 400
 
-    # -----------------------------------------------------
-    # CREATE JOB
-    # -----------------------------------------------------
-
     job_id = str(
         uuid.uuid4()
     )
 
-    with jobs_lock:
+    download_jobs[job_id] = {
 
-        download_jobs[job_id] = {
+        "status":
+            "starting",
 
-            "status":
-                "starting",
+        "progress":
+            0,
 
-            "progress":
-                0,
+        "speed":
+            "--",
 
-            "speed":
-                "--",
+        "eta":
+            "--"
 
-            "eta":
-                "--"
-
-        }
-
-    # -----------------------------------------------------
-    # START BACKGROUND THREAD
-    # -----------------------------------------------------
+    }
 
     thread = threading.Thread(
 
@@ -645,11 +654,8 @@ def start_download():
         args=(
 
             url,
-
             format_type,
-
             quality,
-
             job_id
 
         ),
@@ -659,10 +665,6 @@ def start_download():
     )
 
     thread.start()
-
-    # -----------------------------------------------------
-    # RETURN JOB ID IMMEDIATELY
-    # -----------------------------------------------------
 
     return jsonify({
 
@@ -680,70 +682,53 @@ def start_download():
 # =========================================================
 
 @app.route(
-    "/progress/<job_id>",
-    methods=["GET"]
+    "/progress/<job_id>"
 )
 def get_progress(job_id):
 
-    with jobs_lock:
+    job = download_jobs.get(
+        job_id
+    )
 
-        job = download_jobs.get(
-            job_id
-        )
+    if not job:
 
-        if not job:
+        return jsonify({
 
-            return jsonify({
+            "success":
+                False,
 
-                "success":
-                    False,
+            "error":
+                "Download job not found."
 
-                "error":
-                    "Download job not found."
-
-            }), 404
-
-        result = dict(job)
+        }), 404
 
     return jsonify({
 
         "success":
             True,
 
-        **result
+        **job
 
     })
 
 
 # =========================================================
-# SERVE DOWNLOADED FILE
+# SERVE FILE
 # =========================================================
 
 @app.route(
-    "/file/<filename>",
-    methods=["GET"]
+    "/file/<filename>"
 )
 def serve_file(filename):
-
-    # -----------------------------------------------------
-    # SECURITY
-    # -----------------------------------------------------
 
     safe_filename = os.path.basename(
         filename
     )
 
     filepath = os.path.join(
-
         DOWNLOAD_DIR,
-
         safe_filename
-
     )
-
-    # -----------------------------------------------------
-    # CHECK FILE
-    # -----------------------------------------------------
 
     if not os.path.isfile(filepath):
 
@@ -757,115 +742,17 @@ def serve_file(filename):
 
         }), 404
 
-    # -----------------------------------------------------
-    # SEND FILE
-    # -----------------------------------------------------
-
     return send_file(
 
         filepath,
 
-        as_attachment=True,
-
-        download_name=safe_filename
+        as_attachment=True
 
     )
 
 
 # =========================================================
-# HEALTH CHECK
-# =========================================================
-
-@app.route(
-    "/health",
-    methods=["GET"]
-)
-def health():
-
-    return jsonify({
-
-        "status":
-            "ok"
-
-    })
-
-
-# =========================================================
-# CLEAN OLD FILES
-# =========================================================
-
-def cleanup_old_files():
-
-    while True:
-
-        try:
-
-            now = time.time()
-
-            for filename in os.listdir(
-                DOWNLOAD_DIR
-            ):
-
-                filepath = os.path.join(
-
-                    DOWNLOAD_DIR,
-
-                    filename
-
-                )
-
-                if not os.path.isfile(filepath):
-                    continue
-
-                # Delete files older than 1 hour
-                if (
-                    now -
-                    os.path.getmtime(filepath)
-                    > 3600
-                ):
-
-                    try:
-
-                        os.remove(filepath)
-
-                        print(
-                            f"Deleted old file: {filename}"
-                        )
-
-                    except Exception as e:
-
-                        print(
-                            "Cleanup error:",
-                            e
-                        )
-
-        except Exception as e:
-
-            print(
-                "Cleanup thread error:",
-                e
-            )
-
-        time.sleep(600)
-
-
-# =========================================================
-# START CLEANUP THREAD
-# =========================================================
-
-cleanup_thread = threading.Thread(
-
-    target=cleanup_old_files,
-
-    daemon=True
-
-)
-
-cleanup_thread.start()
-
-
-# =========================================================
-# LOCAL DEVELOPMENT
+# RUN
 # =========================================================
 
 if __name__ == "__main__":
