@@ -1,0 +1,461 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+
+    <meta charset="UTF-8">
+
+    <meta
+        name="viewport"
+        content="width=device-width, initial-scale=1.0"
+    >
+
+    <meta
+        name="theme-color"
+        content="#02070b"
+    >
+
+    <title>CyberTube Downloader</title>
+
+    <link
+        rel="stylesheet"
+        href="{{ url_for('static', filename='style.css') }}"
+    >
+
+</head>
+
+<body>
+
+    <div class="grid-background"></div>
+
+    <div class="glow glow-1"></div>
+    <div class="glow glow-2"></div>
+
+
+    <main class="app">
+
+        <!-- ================= HEADER ================= -->
+
+        <header class="header">
+
+            <div class="brand">
+
+                <div class="brand-logo">
+                    ▶
+                </div>
+
+                <div>
+
+                    <h1>
+                        CyberTube
+                    </h1>
+
+                    <p>
+                        MEDIA DOWNLOADER
+                    </p>
+
+                </div>
+
+            </div>
+
+
+            <div class="status">
+
+                <span class="status-dot"></span>
+
+                SYSTEM ONLINE
+
+            </div>
+
+        </header>
+
+
+
+        <!-- ================= MAIN CARD ================= -->
+
+        <section class="card">
+
+
+            <!-- HERO -->
+
+            <div class="hero">
+
+                <div class="terminal-label">
+                    &gt; DOWNLOAD YOUR MEDIA
+                </div>
+
+                <h2>
+                    Download.
+                    <span>Fast.</span>
+                </h2>
+
+                <p>
+                    Paste a YouTube URL and select your
+                    preferred format and quality.
+                </p>
+
+            </div>
+
+
+
+            <!-- ================= URL ================= -->
+
+            <div class="form-group">
+
+                <label>
+                    YOUTUBE URL
+                </label>
+
+
+                <div class="url-container">
+
+                    <div class="url-icon">
+                        🔗
+                    </div>
+
+
+                    <input
+                        type="text"
+                        id="youtube-url"
+                        placeholder="https://www.youtube.com/watch?v=..."
+                        autocomplete="off"
+                    >
+
+
+                    <button
+                        id="fetch-btn"
+                        class="fetch-btn"
+                        onclick="fetchVideo()"
+                    >
+
+                        <span id="fetch-text">
+                            FETCH
+                        </span>
+
+                    </button>
+
+                </div>
+
+            </div>
+
+
+
+            <!-- ================= VIDEO INFORMATION ================= -->
+
+            <section
+                id="video-card"
+                class="video-card hidden"
+            >
+
+                <div class="thumbnail-wrapper">
+
+                    <img
+                        id="video-thumbnail"
+                        src=""
+                        alt="Video thumbnail"
+                    >
+
+                    <div class="play-overlay">
+                        ▶
+                    </div>
+
+                </div>
+
+
+                <div class="video-details">
+
+                    <div class="video-source">
+                        YOUTUBE
+                    </div>
+
+
+                    <h3 id="video-title">
+                        Video title
+                    </h3>
+
+
+                    <div class="metadata">
+
+                        <span>
+
+                            ⏱
+
+                            <strong id="video-duration">
+                                --
+                            </strong>
+
+                        </span>
+
+
+                        <span>
+
+                            📺
+
+                            <strong id="video-channel">
+                                --
+                            </strong>
+
+                        </span>
+
+                    </div>
+
+                </div>
+
+            </section>
+
+
+
+            <!-- ================= OPTIONS ================= -->
+
+            <div class="options-grid">
+
+
+                <!-- FORMAT -->
+
+                <div class="form-group">
+
+                    <label>
+                        FORMAT
+                    </label>
+
+
+                    <select id="format">
+
+                        <option value="mp4">
+                            🎬 MP4 VIDEO
+                        </option>
+
+                        <option value="mp3">
+                            🎵 MP3 AUDIO
+                        </option>
+
+                    </select>
+
+                </div>
+
+
+
+                <!-- QUALITY -->
+
+                <div
+                    class="form-group"
+                    id="quality-group"
+                >
+
+                    <label>
+                        QUALITY
+                    </label>
+
+
+                    <select id="quality">
+
+                        <option value="360p">
+                            360P
+                        </option>
+
+                        <option value="480p">
+                            480P
+                        </option>
+
+                        <option
+                            value="720p"
+                            selected
+                        >
+                            720P
+                        </option>
+
+                        <option value="1080p">
+                            1080P
+                        </option>
+
+                        <option value="1440p">
+                            1440P
+                        </option>
+
+                        <option value="2160p">
+                            2160P
+                        </option>
+
+                    </select>
+
+                </div>
+
+            </div>
+
+
+
+            <!-- ================= DOWNLOAD BUTTON ================= -->
+
+            <button
+                id="download-btn"
+                class="download-btn"
+                onclick="startDownload()"
+            >
+
+                <span class="download-icon">
+                    ↓
+                </span>
+
+                <span>
+                    DOWNLOAD
+                </span>
+
+            </button>
+
+
+
+            <!-- ================= LIVE PROGRESS ================= -->
+
+            <section class="progress-section">
+
+                <div class="progress-header">
+
+                    <span id="status">
+                        READY TO DOWNLOAD
+                    </span>
+
+
+                    <span id="percentage">
+                        0%
+                    </span>
+
+                </div>
+
+
+                <div class="progress-bar">
+
+                    <div
+                        id="progress-fill"
+                        class="progress-fill"
+                    ></div>
+
+                </div>
+
+
+                <div class="progress-details">
+
+                    <span id="speed">
+                        —
+                    </span>
+
+
+                    <span id="eta">
+                        —
+                    </span>
+
+                </div>
+
+            </section>
+
+
+
+            <!-- ================= SUCCESS ================= -->
+
+            <section
+                id="success-card"
+                class="success-card hidden"
+            >
+
+                <div class="success-icon">
+                    ✓
+                </div>
+
+
+                <div class="success-content">
+
+                    <strong>
+                        DOWNLOAD COMPLETED
+                    </strong>
+
+
+                    <p id="success-title">
+                        Your file is ready.
+                    </p>
+
+                </div>
+
+
+                <div class="success-actions">
+
+                    <button
+                        type="button"
+                        class="another-btn"
+                        onclick="downloadAnother()"
+                    >
+                        ⬇ DOWNLOAD ANOTHER
+                    </button>
+
+
+                    <button
+                        type="button"
+                        class="back-btn"
+                        onclick="goBack()"
+                    >
+                        ← BACK
+                    </button>
+
+                </div>
+
+            </section>
+
+
+
+            <!-- ================= ERROR ================= -->
+
+            <section
+                id="error-card"
+                class="error-card hidden"
+            >
+
+                <div class="error-icon">
+                    !
+                </div>
+
+
+                <div>
+
+                    <strong>
+                        DOWNLOAD FAILED
+                    </strong>
+
+
+                    <p id="error-message">
+                        Something went wrong.
+                    </p>
+
+                </div>
+
+            </section>
+
+        </section>
+
+
+
+        <!-- ================= FOOTER ================= -->
+
+        <footer>
+
+            <span>
+                CYBERTUBE DOWNLOADER
+            </span>
+
+
+            <span>
+                FLASK + yt-dlp
+            </span>
+
+        </footer>
+
+    </main>
+
+
+
+    <!-- ================= JAVASCRIPT ================= -->
+
+    <script
+        src="{{ url_for('static', filename='script.js') }}"
+    ></script>
+
+</body>
+
+</html>
